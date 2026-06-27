@@ -2,78 +2,109 @@ import os
 import sys
 from smolagents import CodeAgent, LiteLLMModel, tool
 
-# Verify that the API Key is active in the environment
-if not os.environ.get("GEMINI_API_KEY"):
-    print("[Error] GEMINI_API_KEY environment variable is not set.")
-    print("Please run: $env:GEMINI_API_KEY='your_api_key' in PowerShell before running.")
-    sys.exit(1)
-
-# 1. First Tool: Property Tax Rate Lookup (Reflection-driven)
-@tool
-def get_property_tax(location: str) -> str:
-    """
-    Calculates property tax rates for a given location.
-
-    Args:
-        location: The name of the city or state.
-    """
-    loc = location.lower()
-    if "new york" in loc:
-        return "Property tax rate is 1.62%"
-    elif "california" in loc:
-        return "Property tax rate is 0.75%"
+# =====================================================================
+# 1. UNTYPED LEGACY INFRASTRUCTURE (Mocking a 3rd Party Database Library)
+# =====================================================================
+def legacy_untyped_query(sql_query):
+    query_lower = sql_query.lower()
+    if "california" in query_lower:
+        return "California Real Estate Data: Average Home Price is $500,000. Property tax rate is 0.0075 (0.75%)."
+    elif "new york" in query_lower:
+        return "New York Real Estate Data: Average Home Price is $500,000. Property tax rate is 0.0162 (1.62%)."
     else:
-        return "Standard regional property tax rate is 1.1%"
+        return "Standard Regional Data: Average Home Price is $400,000. Property tax rate is 0.011 (1.10%)."
 
-# 2. Second Tool: Demonstrating Composability (Math and logical execution)
+
+# =====================================================================
+# 2. ADAPTER DESIGN PATTERN & PROGRAMMATIC SANITIZATION (CTO Guardrails)
+# =====================================================================
 @tool
-def calculate_monthly_cost(property_value: float, tax_rate_string: str) -> float:
+def secure_database_query(sql_query: str) -> str:
     """
-    Calculates the combined monthly mortgage principal and property tax payment.
-    Assumes a fixed annual interest rate of 4.5% over a 30-year term.
+    Executes a read-only SQL query against the real estate database to fetch home values and tax rates.
 
     Args:
-        property_value: The market purchase price of the property.
-        tax_rate_string: The raw tax rate string returned from get_property_tax (e.g., "Property tax rate is 1.62%").
+        sql_query: A strict SQL SELECT string (e.g., "SELECT * FROM real_estate WHERE location = 'California'"). Mutative keywords (DROP, DELETE, UPDATE, INSERT) are strictly forbidden.
+    """
+    destructive_keywords = ["DROP", "DELETE", "UPDATE", "INSERT", "TRUNCATE", "ALTER"]
+    upper_query = sql_query.upper()
+
+    for keyword in destructive_keywords:
+        if keyword in upper_query:
+            return f"Security Exception Blocked: Command contains mutative keyword '{keyword}'."
+
+    return legacy_untyped_query(sql_query)
+
+
+# =====================================================================
+# 3. COMPOSABLE DATA CONVERSION & COMPUTATIONAL TOOL
+# =====================================================================
+@tool
+def calculate_mortgage_payment(property_value: float, tax_rate: float, interest_rate: float = 0.045, term_years: int = 30) -> str:
+    """
+    Calculates the estimated monthly mortgage payment (P&I + monthly property tax allocations).
+
+    Args:
+        property_value: The estimated market price of the asset in USD.
+        tax_rate: The local property tax rate expressed as a decimal value (e.g., 0.0075 for 0.75%).
+        interest_rate: The annual mortgage interest rate. Defaults to 0.045 (4.5%).
+        term_years: The duration of the loan in years. Defaults to 30.
     """
     try:
-        # Extract the numeric float from the string output (e.g., "1.62%" -> 0.0162)
-        percentage_str = tax_rate_string.split("is")[-1].replace("%", "").strip()
-        tax_rate = float(percentage_str) / 100.0
+        annual_tax = property_value * tax_rate
+        monthly_tax = annual_tax / 12.0
+
+        monthly_interest = interest_rate / 12.0
+        total_months = term_years * 12
+
+        if monthly_interest == 0:
+            monthly_p_and_i = property_value / total_months
+        else:
+            monthly_p_and_i = property_value * (
+                (monthly_interest * (1 + monthly_interest)**total_months) / 
+                ((1 + monthly_interest)**total_months - 1)
+            )
+
+        total_monthly = monthly_p_and_i + monthly_tax
+
+        return (
+            f"Mortgage Calculation Success:\n"
+            f"- Home Value: ${property_value:,.2f}\n"
+            f"- Principal & Interest: ${monthly_p_and_i:,.2f}/mo\n"
+            f"- Property Tax Escrow: ${monthly_tax:,.2f}/mo\n"
+            f"- Combined Est. Monthly: ${total_monthly:,.2f}/mo"
+        )
     except Exception as e:
-        # Fallback if parsing fails
-        tax_rate = 0.011
-        
-    # Calculate annual property tax
-    annual_tax = property_value * tax_rate
-    monthly_tax = annual_tax / 12.0
-    
-    # Simple mortgage math: 4.5% annual interest fixed for 30 years
-    r = 0.045 / 12.0
-    n = 30 * 12
-    monthly_principal_interest = property_value * (r * (1 + r)**n) / ((1 + r)**n - 1)
-    
-    return round(monthly_principal_interest + monthly_tax, 2)
+        return f"Computation Error: {str(e)}"
 
-# 3. Initialize the Model Engine
-# Using LiteLLMModel to map seamlessly to Gemini using your active environment variable
-model = LiteLLMModel(
-    model_id="gemini/gemini-2.5-flash",
-    api_key=os.environ.get("GEMINI_API_KEY")
-)
 
-# 4. Initialize the CodeAgent with multiple tools
-agent = CodeAgent(
-    tools=[get_property_tax, calculate_monthly_cost],
-    model=model,
-    add_base_tools=False
-)
+# =====================================================================
+# 4. ENGINE INITIALIZATION
+# =====================================================================
+def main():
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("[Fatal Environment Error]: GEMINI_API_KEY environment variable is not defined.")
+        sys.exit(1)
 
-# 5. Execute a composable multi-step problem
-if __name__ == "__main__":
-    task = (
-        "Compare the total monthly carrying cost for a $500,000 property "
-        "between California and New York. Fetch the tax rates first, "
-        "and then compute the final monthly payment for both states."
+    model = LiteLLMModel(
+        model_id="gemini/gemini-2.5-flash",
+        api_key=api_key
     )
-    agent.run(task)
+
+    agent = CodeAgent(
+        tools=[secure_database_query, calculate_mortgage_payment],
+        model=model,
+        add_base_tools=False
+    )
+
+    user_prompt = (
+        "Use secure_database_query to look up California and New York. "
+        "Then use calculate_mortgage_payment to find the total monthly costs for a $500,000 home in both states using their parsed tax rates. Compare them."
+    )
+
+    agent.run(user_prompt)
+
+
+if __name__ == "__main__":
+    main()
