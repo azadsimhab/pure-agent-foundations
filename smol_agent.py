@@ -3,88 +3,172 @@ import sys
 from smolagents import CodeAgent, LiteLLMModel, tool
 
 # =====================================================================
-# 1. UNTYPED LEGACY INFRASTRUCTURE (Mocking a 3rd Party Database Library)
+# 1. UNTYPED LEGACY DATABASE INFRASTRUCTURE (Mocking University tables)
 # =====================================================================
-def legacy_untyped_query(sql_query):
-    query_lower = sql_query.lower()
-    if "california" in query_lower:
-        return "California Real Estate Data: Average Home Price is $500,000. Property tax rate is 0.0075 (0.75%)."
-    elif "new york" in query_lower:
-        return "New York Real Estate Data: Average Home Price is $500,000. Property tax rate is 0.0162 (1.62%)."
-    else:
-        return "Standard Regional Data: Average Home Price is $400,000. Property tax rate is 0.011 (1.10%)."
+# This simulates an old, raw string-query interface typical of legacy university systems.
+# Exposing this untyped interface directly to the LLM would fail schema generation.
+MOCK_ROOMS = {
+    "R101": {"capacity": 60, "building": "Academic Block A"},
+    "R102": {"capacity": 30, "building": "Academic Block A"},
+    "LH201": {"capacity": 120, "building": "Lecture Hall Complex"}
+}
+
+MOCK_EXAMS = {
+    "CS102": {"course_name": "Data Structures & Algorithms", "student_count": 45},
+    "MAT201": {"course_name": "Linear Algebra", "student_count": 80},
+    "PHY101": {"course_name": "Engineering Physics", "student_count": 25}
+}
+
+MOCK_INVIGILATORS = {
+    "FAC01": {"name": "Prof. Sarah", "max_duties": 3, "current_duties": 1},
+    "FAC02": {"name": "Prof. Ratan", "max_duties": 2, "current_duties": 2} # This proctor is at their duty limit!
+}
+
+MOCK_ALLOCATIONS = [
+    {"room_code": "R102", "timeslot_id": "MON_FN", "faculty_id": "FAC01", "exam_id": "CS102"} # Room 102 booked Monday Forenoon
+]
+
+def raw_legacy_db_query(raw_string_query: str) -> str:
+    """Simulates a low-level untyped database read."""
+    clean_query = raw_string_query.upper().strip()
+    # Mock lookup behavior based on text search
+    if "R102" in clean_query:
+        return "ROOM_FOUND: R102, CAPACITY: 30, STATUS: ACTIVE"
+    elif "R101" in clean_query:
+        return "ROOM_FOUND: R101, CAPACITY: 60, STATUS: ACTIVE"
+    elif "LH201" in clean_query:
+        return "ROOM_FOUND: LH201, CAPACITY: 120, STATUS: ACTIVE"
+    return "ERROR: ROOM_NOT_FOUND"
 
 
 # =====================================================================
-# 2. ADAPTER DESIGN PATTERN & PROGRAMMATIC SANITIZATION (CTO Guardrails)
+# 2. UNIT 1 COMPOSABLE TOOLS WITH ADAPTERS & SANITIZATION
 # =====================================================================
+
 @tool
-def secure_database_query(sql_query: str) -> str:
+def check_room_availability(room_code: str, timeslot_id: str) -> str:
     """
-    Executes a read-only SQL query against the real estate database to fetch home values and tax rates.
+    Checks if a specific exam room is occupied or available for a given timeslot.
+    Acts as a secure, typed adapter wrapping the legacy database engine.
 
     Args:
-        sql_query: A strict SQL SELECT string (e.g., "SELECT * FROM real_estate WHERE location = 'California'"). Mutative keywords (DROP, DELETE, UPDATE, INSERT) are strictly forbidden.
+        room_code: The code representing the room (e.g., 'R101', 'R102', 'LH201').
+        timeslot_id: The targeted timeslot ID (e.g., 'MON_FN', 'MON_AN').
     """
-    destructive_keywords = ["DROP", "DELETE", "UPDATE", "INSERT", "TRUNCATE", "ALTER"]
-    upper_query = sql_query.upper()
+    # Programmatic Sanitization (Input boundaries check)
+    clean_room = room_code.strip().upper()
+    clean_slot = timeslot_id.strip().upper()
 
-    for keyword in destructive_keywords:
-        if keyword in upper_query:
-            return f"Security Exception Blocked: Command contains mutative keyword '{keyword}'."
+    # Zero-Trust Input Filter: Prevent prompt injections simulating database commands
+    forbidden_tokens = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", ";"]
+    if any(token in clean_room for token in forbidden_tokens) or any(token in clean_slot for token in forbidden_tokens):
+        return "Security Exception: Blocked potential database manipulation attempt."
 
-    return legacy_untyped_query(sql_query)
+    # Interacting with our legacy untyped query engine via safe wrapping
+    raw_status = raw_legacy_db_query(f"SELECT * FROM rooms WHERE code = '{clean_room}'")
+    if "ERROR" in raw_status:
+        return f"Error: Room '{clean_room}' is not registered in the system database."
+
+    # Check active memory allocations for scheduling conflicts
+    for alloc in MOCK_ALLOCATIONS:
+        if alloc["room_code"] == clean_room and alloc["timeslot_id"] == clean_slot:
+            return f"Conflict: Room {clean_room} is already booked during timeslot {clean_slot} for Exam {alloc['exam_id']}."
+
+    capacity = MOCK_ROOMS[clean_room]["capacity"]
+    return f"Available: Room {clean_room} is unoccupied. Seating Capacity: {capacity} students."
 
 
-# =====================================================================
-# 3. COMPOSABLE DATA CONVERSION & COMPUTATIONAL TOOL
-# =====================================================================
 @tool
-def calculate_mortgage_payment(property_value: float, tax_rate: float, interest_rate: float = 0.045, term_years: int = 30) -> str:
+def check_invigilator_status(faculty_id: str, timeslot_id: str) -> str:
     """
-    Calculates the estimated monthly mortgage payment (P&I + monthly property tax allocations).
+    Evaluates if an invigilator is available, has reached their duty limit, or has a scheduling conflict.
 
     Args:
-        property_value: The estimated market price of the asset in USD.
-        tax_rate: The local property tax rate expressed as a decimal value (e.g., 0.0075 for 0.75%).
-        interest_rate: The annual mortgage interest rate. Defaults to 0.045 (4.5%).
-        term_years: The duration of the loan in years. Defaults to 30.
+        faculty_id: The unique ID of the faculty member (e.g., 'FAC01', 'FAC02').
+        timeslot_id: The targeted timeslot ID (e.g., 'MON_FN', 'MON_AN').
     """
-    try:
-        annual_tax = property_value * tax_rate
-        monthly_tax = annual_tax / 12.0
+    clean_faculty = faculty_id.strip().upper()
+    clean_slot = timeslot_id.strip().upper()
 
-        monthly_interest = interest_rate / 12.0
-        total_months = term_years * 12
+    if clean_faculty not in MOCK_INVIGILATORS:
+        return f"Error: Faculty ID '{clean_faculty}' is not registered in the system database."
 
-        if monthly_interest == 0:
-            monthly_p_and_i = property_value / total_months
-        else:
-            monthly_p_and_i = property_value * (
-                (monthly_interest * (1 + monthly_interest)**total_months) / 
-                ((1 + monthly_interest)**total_months - 1)
-            )
+    faculty = MOCK_INVIGILATORS[clean_faculty]
 
-        total_monthly = monthly_p_and_i + monthly_tax
+    # Rule 1: Check duty allocation limits
+    if faculty["current_duties"] >= faculty["max_duties"]:
+        return f"Unavailable: {faculty['name']} ({clean_faculty}) has reached their maximum duties threshold of {faculty['max_duties']}."
 
+    # Rule 2: Check schedule overlap conflicts
+    for alloc in MOCK_ALLOCATIONS:
+        if alloc["faculty_id"] == clean_faculty and alloc["timeslot_id"] == clean_slot:
+            return f"Conflict: {faculty['name']} is already assigned to invigilate in Room {alloc['room_code']} during timeslot {clean_slot}."
+
+    return f"Available: {faculty['name']} has remaining capacity ({faculty['current_duties']}/{faculty['max_duties']} duties assigned)."
+
+
+@tool
+def allocate_exam_schedule(exam_id: str, room_code: str, timeslot_id: str, faculty_id: str) -> str:
+    """
+    Executes a transaction booking a room and proctor for a specific course exam.
+
+    Args:
+        exam_id: The course code of the exam (e.g., 'CS102', 'MAT201', 'PHY101').
+        room_code: The code representing the room (e.g., 'R101', 'LH201').
+        timeslot_id: The targeted timeslot ID (e.g., 'MON_FN', 'MON_AN').
+        faculty_id: The unique ID of the assigned faculty member (e.g., 'FAC01').
+    """
+    clean_exam = exam_id.strip().upper()
+    clean_room = room_code.strip().upper()
+    clean_slot = timeslot_id.strip().upper()
+    clean_faculty = faculty_id.strip().upper()
+
+    # 1. Input Validation
+    if clean_exam not in MOCK_EXAMS:
+        return f"Allocation Failed: Exam code '{clean_exam}' does not exist."
+    if clean_room not in MOCK_ROOMS:
+        return f"Allocation Failed: Room '{clean_room}' does not exist."
+    if clean_faculty not in MOCK_INVIGILATORS:
+        return f"Allocation Failed: Faculty '{clean_faculty}' does not exist."
+
+    # 2. Capacity Rule check
+    student_count = MOCK_EXAMS[clean_exam]["student_count"]
+    room_capacity = MOCK_ROOMS[clean_room]["capacity"]
+
+    if student_count > room_capacity:
         return (
-            f"Mortgage Calculation Success:\n"
-            f"- Home Value: ${property_value:,.2f}\n"
-            f"- Principal & Interest: ${monthly_p_and_i:,.2f}/mo\n"
-            f"- Property Tax Escrow: ${monthly_tax:,.2f}/mo\n"
-            f"- Combined Est. Monthly: ${total_monthly:,.2f}/mo"
+            f"Allocation Failed: Room capacity overflow. "
+            f"Room {clean_room} can seat {room_capacity} students, but Exam {clean_exam} has {student_count} students registered."
         )
-    except Exception as e:
-        return f"Computation Error: {str(e)}"
+
+    # 3. Mutate transaction log safely
+    new_allocation = {
+        "room_code": clean_room,
+        "timeslot_id": clean_slot,
+        "faculty_id": clean_faculty,
+        "exam_id": clean_exam
+    }
+    MOCK_ALLOCATIONS.append(new_allocation)
+
+    # Update proctor duty counter
+    MOCK_INVIGILATORS[clean_faculty]["current_duties"] += 1
+
+    return (
+        f"Allocation Success:\n"
+        f"- Course scheduled: {clean_exam} ({MOCK_EXAMS[clean_exam]['course_name']})\n"
+        f"- Location assigned: Room {clean_room} (Capacity: {room_capacity} students)\n"
+        f"- Invigilator assigned: {MOCK_INVIGILATORS[clean_faculty]['name']} (Updated Duties: {MOCK_INVIGILATORS[clean_faculty]['current_duties']}/{MOCK_INVIGILATORS[clean_faculty]['max_duties']})"
+    )
 
 
 # =====================================================================
-# 4. ENGINE INITIALIZATION
+# 3. CONTEXT INITIALIZATION & COGNITIVE PLANNING
 # =====================================================================
 def main():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        print("[Fatal Environment Error]: GEMINI_API_KEY environment variable is not defined.")
+        print("[Fatal Error]: GEMINI_API_KEY environment variable is not defined.")
+        print("Run in your shell: $env:GEMINI_API_KEY='your_key'")
         sys.exit(1)
 
     model = LiteLLMModel(
@@ -92,15 +176,24 @@ def main():
         api_key=api_key
     )
 
+    # Instantiate the agent. Note that 'raw_legacy_db_query' is EXCLUDED
+    # following the Principle of Least Privilege. Only secure adapters are passed.
     agent = CodeAgent(
-        tools=[secure_database_query, calculate_mortgage_payment],
+        tools=[check_room_availability, check_invigilator_status, allocate_exam_schedule],
         model=model,
         add_base_tools=False
     )
 
+    # This multi-part goal forces the agent to compile a multi-step sequence:
+    # 1. It must check if Room R102 is free during Monday Forenoon (MON_FN).
+    # 2. It must check if Prof. Sarah (FAC01) or Prof. Ratan (FAC02) is available to proctor.
+    # 3. It must verify if PHY101 (25 students) actually fits in R102.
+    # 4. It must execute the booking and report the allocation success.
     user_prompt = (
-        "Use secure_database_query to look up California and New York. "
-        "Then use calculate_mortgage_payment to find the total monthly costs for a $500,000 home in both states using their parsed tax rates. Compare them."
+        "We need to schedule the Engineering Physics (PHY101) exam during the Monday Forenoon (MON_FN) slot. "
+        "First, verify if Room R102 is available for that slot. "
+        "Second, evaluate the availability of Prof. Sarah (FAC01) and Prof. Ratan (FAC02) for MON_FN. "
+        "Third, attempt to allocate the PHY101 exam to Room R102 with the available proctor. Explain your sequence."
     )
 
     agent.run(user_prompt)
