@@ -1,48 +1,4 @@
-Exam Seating & Invigilator Allocation System: AI Orchestration Layer
-
-Welcome to the AI Orchestration Layer of the Exam Seating & Invigilator Allocation System! This repository documents a progressive software engineering pipeline translating the academic modules of the Hugging Face AI Agents Course directly into an institutional scheduling and optimization engine.
-
-This engine is built to demonstrate the integration of multi-agent cognitive architecture on top of a highly optimized, concurrent Go back-end and MySQL transactional database.
-
-📅 Course Alignment & Feature Roadmap
-
-This repository progresses in direct alignment with each unit of the Hugging Face Agent Course:
-
-Unit 1: Agent Fundamentals (Current Milestone)
-
-The ReAct Loop Primitive: Designed a manual Thought-Action-Observation loop (agent.py) executing stateless multi-turn reasoning and regex command extraction.
-
-Tool Introspection & Reflection: Implemented standard python tools utilizing strict type hints, explicit return annotations, and functional docstrings, allowing frameworks to dynamically auto-generate schema parameters.
-
-Single-Turn Code Composability (smol_agent.py): Migrated JSON-parsing tool calling into a code-execution paradigm using Hugging Face's smolagents framework. Instead of slow back-and-forth tool roundtrips, the agent compiles a complete Python routine that executes evaluations and conditional loops locally.
-
-Operational Constraints Solved (Unit 1 Core):
-
-Capacity Overrun Check: Verifies course student counts against physical classroom dimensions before allocating slots.
-
-Proctor Conflict Avoidance: Evaluates invigilator schedules to block double-bookings and enforce strict department duty ceilings.
-
-Room Double-Booking Guard: Checks current allocation tables to protect physical spaces from conflicting assignments.
-
-Future Units (Syllabus Integration)
-
-Unit 1.5 (Fine-Tuning): Optimizing local open-source models (like Llama/Qwen) specifically for tool calling to query our database routes at sub-second latency.
-
-Unit 2.5 (Observability & Evaluation): Integrating enterprise evaluation suites to trace agent execution logs, track token consumption costs, and handle parser errors gracefully.
-
-Unit 3 (Agentic RAG): Equipping the agent with vector databases containing PDF university guidelines (e.g., "A student cannot take more than two exams in 24 hours") to validate student schedules prior to database commit.
-
-🛡️ Enterprise Security Hardening & Design Patterns
-
-An autonomous system must never operate on a zero-trust network without strict design boundaries. This repository implements standard software engineering guardrails:
-
-A. The Adapter Pattern for Legacy Tables
-
-Modern agent frameworks utilize runtime reflection (inspect module) to read function signatures and docstrings. Directly exposing untyped, unstructured legacy database query engines to an agent fails introspection.
-
-We resolved this by writing secure Adapter Tools (such as check_room_availability) that wrap our legacy database structures, sanitize parameters, and expose typed signatures to the LLM's introspection layer.
-
-# Untyped Legacy Engine
+Exam Seating & Invigilator Allocation System: AI Orchestration LayerWelcome to the AI Orchestration Layer of the Exam Seating & Invigilator Allocation System! This repository documents a progressive software engineering pipeline translating the academic modules of the Hugging Face AI Agents Course directly into an institutional scheduling and optimization engine.This engine is built to demonstrate the integration of multi-agent cognitive architecture on top of a highly optimized, concurrent Go back-end and MySQL transactional database.📅 Course Alignment & Feature RoadmapThis repository progresses in direct alignment with each unit of the Hugging Face Agent Course:Unit 1: Agent Fundamentals (Current Milestone)The ReAct Loop Primitive: Designed a manual Thought-Action-Observation loop (agent.py) executing stateless multi-turn reasoning and regex command extraction.Tool Introspection & Reflection: Implemented standard python tools utilizing strict type hints, explicit return annotations, and functional docstrings, allowing frameworks to dynamically auto-generate schema parameters.Single-Turn Code Composability (smol_agent.py): Migrated JSON-parsing tool calling into a code-execution paradigm using Hugging Face's smolagents framework. Instead of slow back-and-forth tool roundtrips, the agent compiles a complete Python routine that executes evaluations and conditional loops locally.Operational Constraints Solved (Unit 1 Core):Capacity Overrun Check: Verifies course student counts against physical classroom dimensions before allocating slots.Proctor Conflict Avoidance: Evaluates invigilator schedules to block double-bookings and enforce strict department duty ceilings.Room Double-Booking Guard: Checks current allocation tables to protect physical spaces from conflicting assignments.Future Units (Syllabus Integration)Unit 1.5 (Fine-Tuning): Optimizing local open-source models (like Llama/Qwen) specifically for tool calling to query our database routes at sub-second latency.Unit 2.5 (Observability & Evaluation): Integrating enterprise evaluation suites to trace agent execution logs, track token consumption costs, and handle parser errors gracefully.Unit 3 (Agentic RAG): Equipping the agent with vector databases containing PDF university guidelines (e.g., "A student cannot take more than two exams in 24 hours") to validate student schedules prior to database commit.🛡️ Enterprise Security Hardening & Design PatternsAn autonomous system must never operate on a zero-trust network without strict design boundaries:A. The Adapter Pattern for Legacy TablesModern agent frameworks utilize runtime reflection (inspect module) to read function signatures and docstrings. Directly exposing untyped, unstructured legacy database query engines to an agent fails introspection.We resolved this by writing secure Adapter Tools (such as check_room_availability) that wrap our legacy database structures, sanitize parameters, and expose typed signatures to the LLM's introspection layer.# Untyped Legacy Engine
 def raw_legacy_db_query(raw_string_query: str) -> str: ...
 
 # Safe, Typed Adapter Tool
@@ -51,47 +7,7 @@ def check_room_availability(room_code: str, timeslot_id: str) -> str:
     """Checks if a specific exam room is occupied or available."""
     # Sanitization happens here safely
     return raw_legacy_db_query(f"SELECT * FROM rooms...")
-
-
-B. Zero-Trust Input Sanitization
-
-To prevent prompt injection attacks (e.g., trying to alter database records by writing SQL commands into the room_code input), our tools strip whitespace and validate inputs against a blacklist of mutative SQL keywords (DROP, DELETE, UPDATE, INSERT, ;) before executing logic.
-
-C. Client-Side Tool Filtering (Principle of Least Privilege)
-
-We strictly limit the tools registered with the CodeAgent constructor. Even if our database contains powerful administrative mutator commands, the LLM is only given access to highly restricted read-only query adapters and the single transactional allocation tool.
-
-💻 Setup & Local Execution
-
-Prerequisites
-
-Windows PowerShell / Unix Terminal
-
-Python 3.12 or Python 3.13
-
-A valid Google Gemini API Key
-
-Installation
-
-Force package installations to your default python runtime context (e.g., Python 3.13):
-
-& C:/Users/chikk/AppData/Local/Microsoft/WindowsApps/python3.13.exe -m pip install smolagents litellm google-genai --user
-
-
-Bind your Gemini API key inside your current terminal session:
-
-$env:GEMINI_API_KEY="AIzaSyYourKeyHere..."
-
-
-Running the Unit 1 Orchestration Agent
-
-Execute the main scheduling script:
-
-& C:/Users/chikk/AppData/Local/Microsoft/WindowsApps/python3.13.exe smol_agent.py
-
-
-🧠 Architectural Insights Gained
-
-Context Window Optimization: Standard JSON-based tool loops cause exponential token growth because every thought-action-observation turn must be fed back into the context window. Code agents solve this by running multiple calculations inside a single local Python interpreter turn, keeping LLM payload costs low.
-
-Separation of Concerns: The LLM does not execute python code; it acts as a code compiler. Execution remains isolated in a sandboxed runtime environment, keeping the host database server safe.
+B. Zero-Trust Input SanitizationTo prevent prompt injection attacks (e.g., trying to alter database records by writing SQL commands into the room_code input), our tools strip whitespace and validate inputs against a blacklist of mutative SQL keywords (DROP, DELETE, UPDATE, INSERT, ;) before executing logic.C. Client-Side Tool Filtering (Principle of Least Privilege)We strictly limit the tools registered with the CodeAgent constructor. Even if our database contains powerful administrative mutator commands, the LLM is only given access to highly restricted read-only query adapters and the single transactional allocation tool.💻 Setup & Local ExecutionPrerequisitesWindows PowerShell / Unix TerminalPython 3.12 or Python 3.13A valid Google Gemini API KeyInstallationForce package installations to your default python runtime context (e.g., Python 3.13):& C:/Users/chikk/AppData/Local/Microsoft/WindowsApps/python3.13.exe -m pip install smolagents litellm google-genai --user
+Bind your Gemini API key inside your current terminal session:$env:GEMINI_API_KEY="AIzaSyYourKeyHere..."
+Running the Unit 1 Orchestration AgentExecute the main scheduling script:& C:/Users/chikk/AppData/Local/Microsoft/WindowsApps/python3.13.exe smol_agent.py
+🧠 Architectural Insights GainedContext Window Optimization: Standard JSON-based tool loops cause exponential token growth because every thought-action-observation turn must be fed back into the context window. Code agents solve this by running multiple calculations inside a single local Python interpreter turn, keeping LLM payload costs low.Separation of Concerns: The LLM does not execute python code; it acts as a code compiler. Execution remains isolated in a sandboxed runtime environment, keeping the host database server safe.
