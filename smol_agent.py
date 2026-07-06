@@ -5,8 +5,6 @@ from smolagents import CodeAgent, LiteLLMModel, tool
 # =====================================================================
 # 1. UNTYPED LEGACY DATABASE INFRASTRUCTURE (Mocking University tables)
 # =====================================================================
-# This simulates an old, raw string-query interface typical of legacy university systems.
-# Exposing this untyped interface directly to the LLM would fail schema generation.
 MOCK_ROOMS = {
     "R101": {"capacity": 60, "building": "Academic Block A"},
     "R102": {"capacity": 30, "building": "Academic Block A"},
@@ -21,17 +19,16 @@ MOCK_EXAMS = {
 
 MOCK_INVIGILATORS = {
     "FAC01": {"name": "Prof. Sarah", "max_duties": 3, "current_duties": 1},
-    "FAC02": {"name": "Prof. Ratan", "max_duties": 2, "current_duties": 2} # This proctor is at their duty limit!
+    "FAC02": {"name": "Prof. Ratan", "max_duties": 2, "current_duties": 2} # Proctor is at their duty limit!
 }
 
 MOCK_ALLOCATIONS = [
-    {"room_code": "R102", "timeslot_id": "MON_FN", "faculty_id": "FAC01", "exam_id": "CS102"} # Room 102 booked Monday Forenoon
+    {"room_code": "R102", "timeslot_id": "MON_FN", "faculty_id": "FAC01", "exam_id": "CS102"} # R102 is booked!
 ]
 
 def raw_legacy_db_query(raw_string_query: str) -> str:
     """Simulates a low-level untyped database read."""
     clean_query = raw_string_query.upper().strip()
-    # Mock lookup behavior based on text search
     if "R102" in clean_query:
         return "ROOM_FOUND: R102, CAPACITY: 30, STATUS: ACTIVE"
     elif "R101" in clean_query:
@@ -55,21 +52,18 @@ def check_room_availability(room_code: str, timeslot_id: str) -> str:
         room_code: The code representing the room (e.g., 'R101', 'R102', 'LH201').
         timeslot_id: The targeted timeslot ID (e.g., 'MON_FN', 'MON_AN').
     """
-    # Programmatic Sanitization (Input boundaries check)
     clean_room = room_code.strip().upper()
     clean_slot = timeslot_id.strip().upper()
 
-    # Zero-Trust Input Filter: Prevent prompt injections simulating database commands
+    # Zero-Trust Input Filter
     forbidden_tokens = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", ";"]
     if any(token in clean_room for token in forbidden_tokens) or any(token in clean_slot for token in forbidden_tokens):
         return "Security Exception: Blocked potential database manipulation attempt."
 
-    # Interacting with our legacy untyped query engine via safe wrapping
     raw_status = raw_legacy_db_query(f"SELECT * FROM rooms WHERE code = '{clean_room}'")
     if "ERROR" in raw_status:
         return f"Error: Room '{clean_room}' is not registered in the system database."
 
-    # Check active memory allocations for scheduling conflicts
     for alloc in MOCK_ALLOCATIONS:
         if alloc["room_code"] == clean_room and alloc["timeslot_id"] == clean_slot:
             return f"Conflict: Room {clean_room} is already booked during timeslot {clean_slot} for Exam {alloc['exam_id']}."
@@ -168,7 +162,6 @@ def main():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         print("[Fatal Error]: GEMINI_API_KEY environment variable is not defined.")
-        print("Run in your shell: $env:GEMINI_API_KEY='your_key'")
         sys.exit(1)
 
     model = LiteLLMModel(
@@ -176,24 +169,20 @@ def main():
         api_key=api_key
     )
 
-    # Instantiate the agent. Note that 'raw_legacy_db_query' is EXCLUDED
-    # following the Principle of Least Privilege. Only secure adapters are passed.
     agent = CodeAgent(
         tools=[check_room_availability, check_invigilator_status, allocate_exam_schedule],
         model=model,
         add_base_tools=False
     )
 
-    # This multi-part goal forces the agent to compile a multi-step sequence:
-    # 1. It must check if Room R102 is free during Monday Forenoon (MON_FN).
-    # 2. It must check if Prof. Sarah (FAC01) or Prof. Ratan (FAC02) is available to proctor.
-    # 3. It must verify if PHY101 (25 students) actually fits in R102.
-    # 4. It must execute the booking and report the allocation success.
+    # Harder user prompt: Specifically forces the agent to experience environmental
+    # failures (R102 is occupied, FAC02 is at limit) and adapt dynamically to find fallbacks.
     user_prompt = (
         "We need to schedule the Engineering Physics (PHY101) exam during the Monday Forenoon (MON_FN) slot. "
-        "First, verify if Room R102 is available for that slot. "
-        "Second, evaluate the availability of Prof. Sarah (FAC01) and Prof. Ratan (FAC02) for MON_FN. "
-        "Third, attempt to allocate the PHY101 exam to Room R102 with the available proctor. Explain your sequence."
+        "Your priority is to book Room R102 with Prof. Ratan (FAC02). "
+        "If you observe any database conflicts or proctor capacity blockages, integrate that feedback "
+        "to adapt your plan. Resolve the allocation by testing fallback rooms (like R101 or LH201) "
+        "and alternative proctors (like Prof. Sarah/FAC01) until you secure a valid, conflict-free booking transaction."
     )
 
     agent.run(user_prompt)
