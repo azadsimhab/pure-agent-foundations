@@ -1,50 +1,62 @@
 import os
+import sys
 import json
 from google import genai
 from google.genai import types
 
-# 1. Define the deterministic tool (The 'Outside World' action)
-def get_property_tax(location: str) -> str:
-    """Calculates property tax rates for a given location."""
-    loc = location.lower()
-    if "new york" in loc:
-        return "Property tax rate is 1.62%"
-    elif "california" in loc:
-        return "Property tax rate is 0.75%"
-    else:
-        return "Standard regional property tax rate is 1.1%"
+# Hardcoded state table simulating our SQL Database tables
+MOCK_DATABASE = {
+    "rooms": {
+        "R101": {"capacity": 60, "status": "Available"},
+        "R102": {"capacity": 30, "status": "Booked (Exam CS102, MON_FN)"}
+    }
+}
 
-# Map string names to the actual executable Python functions
+def check_room_availability(room_code: str) -> str:
+    """Deterministic read tool for room capacity and current bookings."""
+    code = room_code.strip().upper()
+    if code not in MOCK_DATABASE["rooms"]:
+        return f"Error: Room {code} is not registered."
+    room = MOCK_DATABASE["rooms"][code]
+    return f"Room {code} status: {room['status']}, seating capacity: {room['capacity']} students."
+
+# Mapping string actions to executable python functions
 TOOL_MAP = {
-    "get_property_tax": get_property_tax
+    "check_room_availability": check_room_availability
 }
 
 class PureAgent:
     def __init__(self):
-        # Initialize the client (automatically reads GEMINI_API_KEY env)
-        self.client = genai.Client()
+        # Initialize raw Gemini Client (automatically reads GEMINI_API_KEY env)
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            print("[Fatal Error] GEMINI_API_KEY is not defined in the environment.")
+            sys.exit(1)
+            
+        self.client = genai.Client(api_key=api_key)
         self.model_id = 'gemini-2.5-flash'
         
-        # 2. Set ReAct system instructions
+        # Inject structural instructions: Defining how the model MUST format actions
         self.system_instruction = (
-            "You are a multi-step execution agent. You solve tasks by looping through: "
-            "Thought -> Action -> Observation.\n\n"
+            "You are an institutional scheduling orchestrator. You operate strictly inside a "
+            "Thought -> Action -> Observation loop.\n\n"
             "Available tools:\n"
-            "- get_property_tax(location: str): Returns tax details for a city or state.\n\n"
-            "To call a tool, you must output a valid JSON block inside markdown brackets, "
-            "and STOP generating further text. Example:\n"
+            "- check_room_availability(room_code: str): Returns capacity and current booking status.\n\n"
+            "To call a tool, you must generate a JSON codeblock containing 'action' "
+            "and 'action_input', and STOP generating immediately. Example:\n"
             "```json\n"
-            '{"action": "get_property_tax", "action_input": "New York"}\n'
+            '{"action": "check_room_availability", "action_input": "R102"}\n'
             "```\n\n"
-            "When you have the final answer based on observations, respond with 'FINAL_ANSWER: <your answer>'"
+            "Once you receive an Observation, write your next Thought.\n"
+            "When the objective is completed, output your final result starting with 'FINAL_ANSWER: '."
         )
         self.memory = []
 
     def run(self, user_task: str, max_steps: int = 5):
-        print(f"[Initialization] Task: {user_task}")
-        print("-" * 60)
+        print(f"[Initialization] Starting Task: {user_task}")
+        print("-" * 70)
         
-        # The new SDK requires strict types.Content objects instead of raw dictionaries
+        # New Google GenAI SDK requires strict types.Content objects
         self.memory.append(
             types.Content(
                 role="user",
@@ -58,7 +70,7 @@ class PureAgent:
             print(f"\n--- STEP {step} ---")
             
             try:
-                # Execute API call with strict history structures
+                # Send the complete state history to the stateless API
                 response = self.client.models.generate_content(
                     model=self.model_id,
                     contents=self.memory,
@@ -72,28 +84,30 @@ class PureAgent:
                 return
 
             llm_output = response.text
-            print(f"[Agent Output]:\n{llm_output}")
+            print(f"[Agent Thought/Output]:\n{llm_output}")
             
+            # 1. Check Exit Condition
             if "FINAL_ANSWER:" in llm_output:
-                print("\n[Success] Final objective achieved.")
+                print("\n[Success] Final Answer reached. Terminating ReAct cycle.")
                 break
                 
-            # 3. Parse tool block from markdown code fences
+            # 2. Stop and Parse Step: Intercept markdown JSON codeblocks
             if "```json" in llm_output:
                 try:
+                    # Isolate the JSON string
                     json_str = llm_output.split("```json")[1].split("```")[0].strip()
                     tool_call = json.loads(json_str)
                     
                     action_name = tool_call["action"]
                     action_input = tool_call["action_input"]
                     
+                    # 3. Deterministic Local Execution (Observation)
                     if action_name in TOOL_MAP:
-                        # 4. Execute observation
-                        print(f"[Executing Tool]: {action_name}({action_input})")
+                        print(f"[Executing Tool Call]: {action_name}('{action_input}')")
                         observation = TOOL_MAP[action_name](action_input)
-                        print(f"[Observation]: {observation}")
+                        print(f"[Observation Received]: {observation}")
                         
-                        # Correctly append historical steps using the required SDK objects
+                        # Append historical steps using the required SDK objects to preserve attention state
                         self.memory.append(
                             types.Content(
                                 role="model",
@@ -110,7 +124,8 @@ class PureAgent:
                         raise ValueError(f"Tool '{action_name}' is not registered.")
                         
                 except Exception as e:
-                    error_msg = f"Parser Error: {str(e)}. Correct your formatting."
+                    # Graceful Error recovery fed back into the loop
+                    error_msg = f"Parser Error: Your tool call failed. Details: {str(e)}. Correct your JSON formatting."
                     print(f"[{error_msg}]")
                     self.memory.append(
                         types.Content(
@@ -125,6 +140,9 @@ class PureAgent:
                         )
                     )
             else:
+                # If LLM just chatted without calling a tool or outputting final answer
+                fallback_msg = "System Warning: You did not execute a tool or output a FINAL_ANSWER. Use a valid JSON block."
+                print(f"[{fallback_msg}]")
                 self.memory.append(
                     types.Content(
                         role="model",
@@ -134,10 +152,11 @@ class PureAgent:
                 self.memory.append(
                     types.Content(
                         role="user",
-                        parts=[types.Part.from_text(text="System Reminder: Call a tool using JSON or output FINAL_ANSWER.")]
+                        parts=[types.Part.from_text(text=fallback_msg)]
                     )
                 )
 
 if __name__ == "__main__":
     agent = PureAgent()
-    agent.run("Compare the property tax implications between living in California and New York.")
+    # Forces the agent to evaluate room constraints using its internal ReAct flow
+    agent.run("Can we schedule the PHY101 exam in Room R102 on Monday forenoon (MON_FN)?")
